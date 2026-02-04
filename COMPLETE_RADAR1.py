@@ -46,8 +46,8 @@ def setup():
     EXIST_MODE
     SPEED_MODE
   '''
-  print("Setting sensor mode to SPEED_MODE...")
-  radar.set_sensor_mode(SPEED_MODE)
+  print("Setting sensor mode to EXIST_MODE...")
+  radar.set_sensor_mode(EXIST_MODE)
   time.sleep(0.5)
   
   # The minimum distance of detection range, the unit is cm, the range (0~2500), does not exceed max, otherwise the work is not normal
@@ -118,21 +118,15 @@ def setup():
   
   
 def loop():
-  # In SPEED_MODE, get_target_number() returns the number of targets (0 or 1)
-  num_targets = radar.get_target_number()
+  motion = radar.motion_detection()
+  print(f"Raw motion value: {motion}, Type: {type(motion)}")
   
-  if num_targets > 0:
+  if motion == 1:
     print("✓ motion exist")
-    # Get distance/range/speed data
-    distance = radar.get_target_range()
-    speed = radar.get_target_speed()
-    energy = radar.get_target_energy()
-    print(f"  Distance: {distance:.2f} cm")
-    if speed != 0:
-      print(f"  Speed: {speed:.2f} cm/s")
-    print(f"  Energy: {energy}")
-  else:
+  elif motion == 0:
     print("✗ no motion")
+  else:
+    print(f"? Unknown value: {motion}")
   
   time.sleep(0.5)
 
