@@ -13,6 +13,14 @@ import serial
 import time
 import smbus
 
+try:
+  import board
+  import neopixel
+  NEOPIXEL_AVAILABLE = True
+except ImportError:
+  NEOPIXEL_AVAILABLE = False
+  print("[WARNING] neopixel library not found. Install with: pip install adafruit-circuitpython-neopixel")
+
 I2C_MODE  = 0x01
 UART_MODE = 0x02
 
@@ -117,6 +125,27 @@ class DFRobot_C4001(object):
   __uart_i2c     =  0
   __speed_null_count = 0
   __all_data = struct_all_data()
+  
+  # Cache for configuration values (since sensor doesn't return them)
+  __cached_trig_sensitivity = 0
+  __cached_keep_sensitivity = 0
+  __cached_trig_delay = 0
+  __cached_keep_timeout = 0
+  __cached_trig_range = 0
+  __cached_min_range = 0
+  __cached_max_range = 0
+  __cached_pwm1 = 0
+  __cached_pwm2 = 0
+  __cached_pwm_timer = 0
+  __cached_io_polarity = 1
+  
+  # Neopixel LED control
+  __neopixel_enabled = False
+  __neopixel_pin = None
+  __neopixel_strip = None
+  __neopixel_num_leds = 1
+  __current_color = (0, 0, 0)
+  
   def __init__(self, bus, Baud):
     if bus != 0:
       self.i2cbus = smbus.SMBus(bus)
@@ -124,7 +153,7 @@ class DFRobot_C4001(object):
     else:
       self.ser = serial.Serial("/dev/ttyAMA0", baudrate=Baud,stopbits=1, timeout=0.5)
       self.__uart_i2c = UART_MODE
-      if self.ser.isOpen == False:
+      if not self.ser.isOpen():
         self.ser.open()
 
   def begin(self):
@@ -194,6 +223,13 @@ class DFRobot_C4001(object):
       data = self.anaysis_data(rslt)
       return data.exist
 
+  def get_all_data(self):
+    '''!
+      @brief get_all_data - returns the complete sensor data structure
+      @return struct_all_data containing all sensor information
+    '''
+    return self.__all_data
+
   def set_sensor_mode(self, mode):
     '''!
       @brief set_sensor_mode
@@ -240,6 +276,7 @@ class DFRobot_C4001(object):
       data = "setSensitivity 255 "
       data += str(sensitivity)
       self.write_cmd(data, data, 1)
+      self.__cached_trig_sensitivity = sensitivity
       return 0
 
   def get_trig_sensitivity(self):
@@ -251,9 +288,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_TRIG_SENSITIVITY, 1)
       return rslt[0]
     else:
-      data = "getSensitivity"
-      response = self.wr_cmd(data, 1)
-      return response.response1
+      # Sensor doesn't support getSensitivity, return cached value
+      return self.__cached_trig_sensitivity
 
   def set_keep_sensitivity(self, sensitivity):
     '''!
@@ -272,6 +308,7 @@ class DFRobot_C4001(object):
       data += str(sensitivity)
       data += " 255"
       self.write_cmd(data, data, 1)
+      self.__cached_keep_sensitivity = sensitivity
       return 0
 
   def get_keep_sensitivity(self):
@@ -283,9 +320,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_KEEP_SENSITIVITY, 1)
       return rslt[0]
     else:
-      data = "getSensitivity"
-      response = self.wr_cmd(data, 1)
-      return response.response2
+      # Sensor doesn't support getSensitivity, return cached value
+      return self.__cached_keep_sensitivity
 
 
   def set_delay(self, trig, keep):
@@ -311,6 +347,8 @@ class DFRobot_C4001(object):
       data += " "
       data += str(keep*0.5)
       self.write_cmd(data, data, 1)
+      self.__cached_trig_delay = trig
+      self.__cached_keep_timeout = keep
       return 0
 
   def get_trig_delay(self):
@@ -322,9 +360,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_TRIG_DELAY, 1)
       return rslt[0]
     else:
-      data = "getLatency"
-      response = self.wr_cmd(data, 2)
-      return response.response1*100
+      # Return cached value
+      return self.__cached_trig_delay*100
     
   def get_keep_timerout(self):
     '''!
@@ -335,9 +372,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_KEEP_TIMEOUT_L, 2)
       return rslt[1]*256 + rslt[0]
     else:
-      data = "getLatency"
-      response = self.wr_cmd(data, 2)
-      return response.response2*2
+      # Return cached value
+      return self.__cached_keep_timeout*2
 
   def set_detection_range(self, min, max, trig):
     '''!
@@ -370,6 +406,9 @@ class DFRobot_C4001(object):
       data1 += str(max / 100.0)
       data2 += str(trig / 100.0)
       self.write_cmd(data1, data2, 2)
+      self.__cached_min_range = min
+      self.__cached_max_range = max
+      self.__cached_trig_range = trig
       return True
 
   def get_trig_range(self):
@@ -381,9 +420,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_E_TRIG_RANGE_L, 2)
       return rslt[1]*256 + rslt[0]
     else:
-      data = "getTrigRange"
-      response = self.wr_cmd(data, 1)
-      return response.response1*100
+      # Return cached value
+      return self.__cached_trig_range
 
 
   def get_max_range(self):
@@ -395,9 +433,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_E_MAX_RANGE_L, 2)
       return rslt[1]*256 + rslt[0]
     else:
-      data = "getRange"
-      response = self.wr_cmd(data, 2)
-      return response.response2*100
+      # Return cached value
+      return self.__cached_max_range
 
   def get_min_range(self):
     '''!
@@ -408,9 +445,8 @@ class DFRobot_C4001(object):
       rslt = self.read_reg(REG_E_MIN_RANGE_L, 2)
       return rslt[1]*256 + rslt[0]
     else:
-      data = "getRange"
-      response = self.wr_cmd(data, 2)
-      return response.response1*100
+      # Return cached value
+      return self.__cached_min_range
 
   def get_target_number(self):
     '''!
@@ -512,6 +548,7 @@ class DFRobot_C4001(object):
       data = "setGpioMode 1 "
       data += str(value)
       self.write_cmd(data, data, 1)
+      self.__cached_io_polarity = value
     return True
 
   def get_io_polaity(self):
@@ -522,9 +559,8 @@ class DFRobot_C4001(object):
     if self.__uart_i2c == I2C_MODE:
       return 1
     else:
-      data = "getGpioMode 1"
-      response = self.wr_cmd(data, 2)
-      return response.response2
+      # Return cached value
+      return self.__cached_io_polarity
 
   def set_pwm(self, pwm1, pwm2, timer):
     '''!
@@ -544,6 +580,9 @@ class DFRobot_C4001(object):
       data += " "
       data += str(timer)
       self.write_cmd(data, data, 1)
+      self.__cached_pwm1 = pwm1
+      self.__cached_pwm2 = pwm2
+      self.__cached_pwm_timer = timer
     return True
 
   def get_pwm(self):
@@ -555,12 +594,10 @@ class DFRobot_C4001(object):
     if self.__uart_i2c == I2C_MODE:
       return pwm_data
     else:
-      data = "getPwm"
-      response = struct_response_data()
-      response = self.wr_cmd(data, 3)
-      pwm_data.pwm1 = response.response1
-      pwm_data.pwm2 = response.response2
-      pwm_data.timer = response.response3
+      # Return cached values
+      pwm_data.pwm1 = self.__cached_pwm1
+      pwm_data.pwm2 = self.__cached_pwm2
+      pwm_data.timer = self.__cached_pwm_timer
       return pwm_data
 
   def get_tmin_range(self):
@@ -633,53 +670,123 @@ class DFRobot_C4001(object):
 
   def anaysis_data(self, data):
     try:
-      str_data = data.decode('utf-8')
-    except ValueError:
+      # Handle both bytes and lists
+      if isinstance(data, list):
+        str_data = bytes(data).decode('utf-8')
+      else:
+        str_data = data.decode('utf-8')
+    except (ValueError, AttributeError):
+      print(f"[DEBUG] Failed to decode data: {data}")
       return self.__all_data
+    
+    print(f"[DEBUG] Raw sensor data: {repr(str_data)}")
+    
+    # Reset exist flag to 0 by default (no motion until proven otherwise)
+    self.__all_data.exist = 0
+    
     response_exist = str_data.find("$DFHPD")
     response_speed = str_data.find("$DFDMD")
+    
+    print(f"[DEBUG] response_exist index: {response_exist}, response_speed index: {response_speed}")
+    
     if response_exist != -1:
       self.__all_data.work_mode = EXIST_MODE
       self.__all_data.work_status = 1
       self.__all_data.init_status = 1
-      self.__all_data.exist = int(str_data[7+response_exist])
+      exist_char = str_data[7+response_exist]
+      self.__all_data.exist = int(exist_char)
+      print(f"[DEBUG] Found DFHPD, exist char: '{exist_char}', value: {self.__all_data.exist}")
+    
     if response_speed != -1:
       self.__all_data.work_mode = SPEED_MODE
       self.__all_data.work_status = 1
       self.__all_data.init_status = 1
-      data_split = str_data[response_speed+7:].split(',')
-      if int(data_split[0]) == 1:
+      
+      # Extract only the LAST packet if multiple are concatenated
+      # Find the last occurrence of $DFDMD
+      last_packet_start = str_data.rfind("$DFDMD")
+      packet_data = str_data[last_packet_start+7:]
+      
+      # Find the end of this packet (marked by *)
+      packet_end = packet_data.find('*')
+      if packet_end != -1:
+        packet_data = packet_data[:packet_end]
+      
+      data_split = packet_data.split(',')
+      print(f"[DEBUG] Parsed data: {data_split}")
+      
+      try:
+        num_targets = int(data_split[0].strip())
+      except (ValueError, IndexError):
+        num_targets = 0
+      
+      if num_targets == 1:
         self.__speed_null_count = 0
-        self.__all_data.number = int(data_split[0])
+        self.__all_data.number = 1
         try:
-          self.__all_data.speed  = float(data_split[3])
-        except:
-          pass
+          self.__all_data.speed = float(data_split[3].strip()) if len(data_split) > 3 else 0
+        except (ValueError, IndexError):
+          self.__all_data.speed = 0
         try:
-          self.__all_data.range  = float(data_split[2])
-        except:
-          pass
+          self.__all_data.range = float(data_split[2].strip()) * 100 if len(data_split) > 2 else 0
+        except (ValueError, IndexError):
+          self.__all_data.range = 0
         try:
-          self.__all_data.energy = int(data_split[4])
-        except:
-          pass
-      else:
-        if self.__speed_null_count < 10:
-          self.__speed_null_count += 1
-        else:
-          self.__all_data.number = 0
-          self.__all_data.speed  = 0
-          self.__all_data.range  = 0
+          self.__all_data.energy = int(data_split[4].strip()) if len(data_split) > 4 else 0
+        except (ValueError, IndexError):
           self.__all_data.energy = 0
+        print(f"[DEBUG] Target detected: num={num_targets}, range={self.__all_data.range}, speed={self.__all_data.speed}, energy={self.__all_data.energy}")
+      else:
+        # No target detected - immediately clear the data
+        self.__all_data.number = 0
+        self.__all_data.speed = 0
+        self.__all_data.range = 0
+        self.__all_data.energy = 0
+        print(f"[DEBUG] No target (num={num_targets})")
+    
     return self.__all_data
   
 
   def anaysis_response(self, data):
     response = struct_response_data()
     try:
-      str_data = data.decode('utf-8')
-    except ValueError:
+      # Handle both bytes and lists
+      if isinstance(data, list):
+        str_data = bytes(data).decode('utf-8')
+      else:
+        str_data = data.decode('utf-8')
+    except (ValueError, AttributeError, TypeError):
       return response
+    
+    print(f"[DEBUG] anaysis_response raw data: {repr(str_data)}")
+    
+    # Check for command acknowledgment (sensor echoes command and returns "Done")
+    if "Done" in str_data or "DFRobot:" in str_data:
+      response.status = True
+      # Try to extract numeric values from the response
+      # Look for patterns like "getSensitivity" responses
+      parts = str_data.split()
+      print(f"[DEBUG] Response parts: {parts}")
+      num_idx = 0
+      for i, part in enumerate(parts):
+        try:
+          if part not in ["Done", "DFRobot:/>"]:
+            # Try to convert to float
+            val = float(part)
+            print(f"[DEBUG] Found numeric value at index {i}: {val}")
+            if num_idx == 0:
+              response.response1 = val
+            elif num_idx == 1:
+              response.response2 = val
+            elif num_idx == 2:
+              response.response3 = val
+            num_idx += 1
+        except ValueError:
+          pass
+      print(f"[DEBUG] Final response: r1={response.response1}, r2={response.response2}, r3={response.response3}")
+      return response
+    
+    # Original "Response" format (for compatibility)
     response_index = str_data.find("Response")
     if response_index != -1:
       # Extract parameters starting after "Response"
@@ -691,24 +798,22 @@ class DFRobot_C4001(object):
         num_parameters += 1
       if num_parameters >= 1:
         try:
-          float(parameters[0])  # Attempts to convert arguments to floating point numbers
           response.response1 = float(parameters[0])
         except ValueError:
-          pass  # If the argument cannot be converted to floating-point, it is ignored
+          pass
       if num_parameters >= 2:
         try:
-          float(parameters[1])  # Attempts to convert arguments to floating point numbers
           response.response2 = float(parameters[1])
         except ValueError:
-          pass  # If the argument cannot be converted to floating-point, it is ignored
+          pass
       if num_parameters >= 3:
         try:
-          float(parameters[2])  # Attempts to convert arguments to floating point numbers
           response.response3 = float(parameters[2])
         except ValueError:
-          pass  # If the argument cannot be converted to floating-point, it is ignored
-    else:
-      response.status = False
+          pass
+      return response
+    
+    response.status = False
     return response
 
 
@@ -716,14 +821,15 @@ class DFRobot_C4001(object):
   def wr_cmd(self, cmd1, count):
     response = struct_response_data()
     self.write_reg(0, STOP_SENSOR)
-    time.sleep(0.1)
+    time.sleep(0.2)
     self.write_reg(0, cmd1)
+    time.sleep(0.2)  # Give sensor time to respond
     rslt = self.read_reg(0, 50)
     len  = 1
     response = self.anaysis_response(rslt)
-    time.sleep(0.05)
+    time.sleep(0.1)
     self.write_reg(0, START_SENSOR)
-    time.sleep(0.05)
+    time.sleep(0.1)
     return response
 
   def write_cmd(self, cmd1, cmd2, count):
@@ -738,6 +844,98 @@ class DFRobot_C4001(object):
     time.sleep(0.05) 
     self.write_reg(0, START_SENSOR)
     time.sleep(0.1)
+
+  def init_neopixel(self, pin=None, num_leds=1):
+    '''!
+      @brief init_neopixel - Initialize neopixel LED strip
+      @param pin GPIO pin number (default board.D4 for GPIO 4)
+      @param num_leds Number of LEDs in the strip (default 1)
+      @return True if successful, False otherwise
+    '''
+    if not NEOPIXEL_AVAILABLE:
+      print("[NEOPIXEL] Neopixel library not available. Install with: pip install adafruit-circuitpython-neopixel")
+      return False
+    
+    try:
+      # Determine pin
+      if pin is None:
+        # Default to GPIO 4
+        import RPi.GPIO as GPIO_temp
+        GPIO_temp.setmode(GPIO_temp.BCM)
+        self.__neopixel_pin = 4
+      else:
+        self.__neopixel_pin = pin
+      
+      # Initialize neopixel strip
+      self.__neopixel_strip = neopixel.NeoPixel(
+        board.D4 if pin is None else pin,
+        num_leds,
+        brightness=0.8,
+        auto_write=True,
+        pixel_order=neopixel.GRB
+      )
+      self.__neopixel_num_leds = num_leds
+      self.__neopixel_enabled = True
+      print(f"[NEOPIXEL] Initialized on pin {self.__neopixel_pin} with {num_leds} LED(s)")
+      return True
+    except Exception as e:
+      print(f"[NEOPIXEL] Failed to initialize: {e}")
+      self.__neopixel_enabled = False
+      return False
+
+  def set_neopixel_color(self, r, g, b):
+    '''!
+      @brief set_neopixel_color - Set all LEDs to specified RGB color
+      @param r Red value (0-255)
+      @param g Green value (0-255)
+      @param b Blue value (0-255)
+    '''
+    if not self.__neopixel_enabled or self.__neopixel_strip is None:
+      return False
+    
+    try:
+      color = (r, g, b)
+      for i in range(self.__neopixel_num_leds):
+        self.__neopixel_strip[i] = color
+      self.__current_color = color
+      return True
+    except Exception as e:
+      print(f"[NEOPIXEL] Failed to set color: {e}")
+      return False
+
+  def set_neopixel_by_distance(self, distance):
+    '''!
+      @brief set_neopixel_by_distance - Set neopixel color based on distance
+      @param distance Distance in cm
+      Thresholds:
+        0-600cm (0-6m): Orange (255, 165, 0)
+        600-2000cm (6-20m): Yellow (255, 255, 0)
+        >2000cm: Off (0, 0, 0)
+    '''
+    if distance is None or distance == 0:
+      self.set_neopixel_color(0, 0, 0)  # Off
+    elif distance < 600:  # 0-6m: Orange
+      self.set_neopixel_color(255, 165, 0)
+    elif distance < 2000:  # 6-20m: Yellow
+      self.set_neopixel_color(255, 255, 0)
+    else:  # >20m: Off
+      self.set_neopixel_color(0, 0, 0)
+
+  def turn_neopixel_off(self):
+    '''!
+      @brief turn_neopixel_off - Turn off all neopixels
+    '''
+    self.set_neopixel_color(0, 0, 0)
+
+  def cleanup_neopixel(self):
+    '''!
+      @brief cleanup_neopixel - Cleanup neopixel resources
+    '''
+    if self.__neopixel_strip is not None:
+      self.turn_neopixel_off()
+      self.__neopixel_strip.deinit()
+      self.__neopixel_enabled = False
+      print("[NEOPIXEL] Cleanup complete")
 
 class DFRobot_C4001_I2C(DFRobot_C4001): 
   def __init__(self, bus, addr):
@@ -768,22 +966,99 @@ class DFRobot_C4001_UART(DFRobot_C4001):
     super(DFRobot_C4001_UART, self).__init__(0, Baud)
 
   def write_reg(self, reg, data):
-    test = bytes(data, encoding='ascii')
+    test = bytes(data + "\r\n", encoding='ascii')
     self.ser.flushInput()
     try:
       self.ser.write(test)
       return
-    except:
-      print("please check connect or mode!")
+    except Exception as e:
+      print(f"please check connect or mode! Error: {e}")
     return
 
   def read_reg(self, reg, len):
-    recv = [0]*len
+    """Read UART data, buffering until a complete packet arrives (ends with *\\r\\n)"""
+    recv = b''
     timenow = time.time()    
-    while(time.time() - timenow) <= 1:
+    
+    while (time.time() - timenow) <= 1:
       count = self.ser.inWaiting()
-      if count != 0:
-        recv = self.ser.read(len)
-        self.ser.flushInput()
-        return recv
-    return recv
+      if count > 0:
+        # Read available data
+        chunk = self.ser.read(count)
+        recv += chunk
+        
+        # Check if we have a complete packet (ends with *\r\n)
+        if b'*\r\n' in recv:
+          # Get the last complete packet
+          last_packet_idx = recv.rfind(b'*\r\n')
+          if last_packet_idx != -1:
+            self.ser.flushInput()
+            # Return last complete packet
+            return recv[:last_packet_idx + 3]
+      
+      # Small delay to avoid busy-waiting
+      time.sleep(0.01)
+    
+    # Timeout - return what we have
+    if recv:
+      self.ser.flushInput()
+      return recv
+    
+    return [0] * len
+
+class DFRobot_C4001_UART_USB(DFRobot_C4001):
+  """UART connection via USB adapter at /dev/ttyUSB0"""
+
+  def __init__(self, Baud):
+    self.__uart_i2c = UART_MODE
+    self.__Baud = Baud
+    self.ser = serial.Serial("/dev/ttyUSB0", baudrate=Baud, stopbits=1, timeout=0.5)
+    if not self.ser.isOpen():
+      self.ser.open()
+
+  def begin(self):
+    '''!
+      @brief begin 
+    '''
+    return True
+
+  def write_reg(self, reg, data):
+    test = bytes(data + "\r\n", encoding='ascii')
+    self.ser.flushInput()
+    try:
+      self.ser.write(test)
+      return
+    except Exception as e:
+      print(f"please check connect or mode! Error: {e}")
+    return
+
+  def read_reg(self, reg, len):
+    """Read UART data, buffering until a complete packet arrives (ends with *\\r\\n)"""
+    recv = b''
+    timenow = time.time()    
+    
+    while (time.time() - timenow) <= 1:
+      count = self.ser.inWaiting()
+      if count > 0:
+        # Read available data
+        chunk = self.ser.read(count)
+        recv += chunk
+        
+        # Check if we have a complete packet (ends with *\r\n)
+        if b'*\r\n' in recv:
+          # Get the last complete packet
+          last_packet_idx = recv.rfind(b'*\r\n')
+          if last_packet_idx != -1:
+            self.ser.flushInput()
+            # Return last complete packet
+            return recv[:last_packet_idx + 3]
+      
+      # Small delay to avoid busy-waiting
+      time.sleep(0.01)
+    
+    # Timeout - return what we have
+    if recv:
+      self.ser.flushInput()
+      return recv
+    
+    return [0] * len
