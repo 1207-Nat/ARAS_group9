@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.append("../")
 import time
-import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO # type: ignore
 from RADAR_Library import *
 import statistics
 from LED import led_controller
@@ -51,8 +51,8 @@ class RadarFilter:
         return self.filtered_val
 
 # Blind spot detection configuration
-BLIND_SPOT_MIN_DISTANCE = 30      # Minimum detection distance (cm)
-BLIND_SPOT_MAX_DISTANCE = 300     # Maximum blind spot range (3 meters)
+BLIND_SPOT_MIN_DISTANCE = 60      # Minimum detection distance (cm)
+BLIND_SPOT_MAX_DISTANCE = 1000     # Maximum blind spot range (10 meters)
 STATIONARY_THRESHOLD = 20         # Speed threshold for stationary object (cm/s)
 FAST_SPEED_THRESHOLD = 100        # Speed threshold for fast-moving object (cm/s)
 ALERT_THRESHOLD = 3               # Consecutive detections before alert
@@ -93,17 +93,17 @@ def setup():
   
   # Set detect threshold - lower values detect stationary objects better
   print("Setting detection threshold...")
-  radar.set_detect_thres(BLIND_SPOT_MIN_DISTANCE, BLIND_SPOT_MAX_DISTANCE, 20)
+  radar.set_detect_thres(BLIND_SPOT_MIN_DISTANCE, BLIND_SPOT_MAX_DISTANCE, 10)
   time.sleep(0.5)
   
   # Set trigger sensitivity for blind spot detection
   print("Setting trigger sensitivity...")
-  radar.set_trig_sensitivity(0)  # Maximum sensitivity
+  radar.set_trig_sensitivity(9)  # Maximum sensitivity
   time.sleep(0.5)
   
   # Set keep sensitivity
   print("Setting keep sensitivity...")
-  radar.set_keep_sensitivity(1)  # Very sensitive
+  radar.set_keep_sensitivity(9)  # Very sensitive
   time.sleep(0.5)
   
   # Trigger delay and keep timeout
