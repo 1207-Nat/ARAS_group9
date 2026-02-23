@@ -122,10 +122,9 @@ class DFRobot_C4001(object):
       self.i2cbus = smbus.SMBus(bus)
       self.__uart_i2c = I2C_MODE
     else:
-      self.ser = serial.Serial("/dev/ttyAMA0", baudrate=Baud,stopbits=1, timeout=0.5)
+      # Only initialize serial if not UART mode, UART subclass will handle it
       self.__uart_i2c = UART_MODE
-      if self.ser.isOpen == False:
-        self.ser.open()
+      self.ser = None
 
   def begin(self):
     '''!
@@ -762,10 +761,26 @@ class DFRobot_C4001_I2C(DFRobot_C4001):
 
 class DFRobot_C4001_UART(DFRobot_C4001):
 
-  def __init__(self, Baud):
+  def __init__(self, Baud, port="/dev/ttyAMA0"):
     self.__uart_i2c = UART_MODE
-    self.__Baud = Baud 
+    self.__Baud = Baud
+    self.__port = port
     super(DFRobot_C4001_UART, self).__init__(0, Baud)
+
+  def begin(self):
+    '''!
+      @brief begin UART connection
+      @return True if successful
+    '''
+    try:
+      self.ser = serial.Serial(self.__port, baudrate=self.__Baud, stopbits=1, timeout=0.5)
+      if not self.ser.isOpen():
+        self.ser.open()
+      print(f"UART initialized on port {self.__port} with baud {self.__Baud}")
+      return True
+    except Exception as e:
+      print(f"Failed to initialize UART on port {self.__port}: {e}")
+      return False
 
   def write_reg(self, reg, data):
     test = bytes(data, encoding='ascii')
